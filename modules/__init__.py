@@ -17,6 +17,7 @@ from . import (
     hsrp,
     icmp_redir,
     impers,
+    ldp,
     lldp,
     llmnr,
     mac,
@@ -30,6 +31,7 @@ from . import (
     swspoof,
     vlan,
     vrrp,
+    vtp,
 )
 
 # Wrap core.preflight as a pseudo-module so it appears in the CLI list
@@ -60,6 +62,7 @@ MODULES = [
     stp,
     swspoof,
     vlan,
+    vtp,
     # ── Routing protocols ─────────────────────────────────────────────────────
     bgp,
     eigrp,
@@ -69,6 +72,7 @@ MODULES = [
     rip,
     ra,
     icmp_redir,
+    ldp,
     llmnr,
     mpls,
 ]
