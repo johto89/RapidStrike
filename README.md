@@ -2,7 +2,7 @@
 
 **Layer 2 / Routing assessment toolkit for internal pentest — Kali-native**
 
-RapidStrike bundles 25 L2–L3 attack modules under a single CLI, with every run
+RapidStrike bundles 27 L2–L3 attack modules under a single CLI, with every run
 written to an audit log tagged by engagement ID. Use it for customer demos and
 network-admin training: each module maps to one concrete misconfiguration that
 can be fixed immediately.
@@ -18,20 +18,20 @@ can be fixed immediately.
 | Demo dies halfway | Every module has `--dry-run` / `--count` for lab validation |
 | No evidence | `rapidstrike_audit.log` ships with the report |
 
-## 25 Modules
+## 27 Modules
 
 | Group | Modules | One-line meaning |
 |-------|---------|------------------|
 | Recon | `preflight` | BPDU listen / MAC count / DAI probe — run first |
 | L2 MITM | `arp`, `icmp-redir`, `impers` | Seize the gateway: ARP poison / ICMP redirect / CAM+ARP |
 | L2 infra | `cam`, `stp`, `mstp`, `mac` | Flood switch into hub / claim root bridge / spoof MAC |
-| VLAN | `vlan`, `dvlan`, `pvlan`, `swspoof` | Scan VLANs / double-tag hop / Private-VLAN bypass / fake trunk switch |
+| VLAN | `vlan`, `dvlan`, `pvlan`, `swspoof`, `vtp` | Scan VLANs / double-tag hop / Private-VLAN bypass / fake trunk / VTP DB overwrite |
 | DHCP | `dhcp-starve`, `dhcp` | Drain the real pool → serve rogue gateway |
 | Discovery | `cdp`, `lldp` | Flood neighbor tables, poison NMS |
 | FHRP | `hsrp`, `vrrp` | Claim virtual-gateway Active/Master |
 | Routing | `rip`, `eigrp`, `ospf`, `bgp` | Inject false routes to pull traffic via attacker |
 | IPv6 / Name | `ra`, `llmnr` | Rogue SLAAC RA / LLMNR-mDNS poison for NetNTLMv2 |
-| MPLS | `mpls` | LDP scan + label inject for VRF-hop test |
+| MPLS | `mpls`, `ldp` | MPLS label-stack inject / LDP label-mapping LFIB poison |
 
 ## Requirements
 
