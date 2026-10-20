@@ -22,6 +22,12 @@
 - [Section 13 — Other Vendor Hardening Keywords](#section-13-other-vendor-hardening-keywords)
 - [Section 14 — Audit Log & Reporting](#section-14-audit-log--reporting)
 - [Section 15 — Troubleshooting](#section-15-troubleshooting)
+- [Appendix A — Trust Model: 5 Implicit Assumptions](#appendix-a--trust-model-5-implicit-assumptions)
+- [Appendix B — Layered Defense Architecture: 4 Principles](#appendix-b--layered-defense-architecture-4-principles)
+- [Appendix C — Detection, Monitoring, Hunting](#appendix-c--detection-monitoring-hunting)
+- [Appendix D — Rollout and Verification](#appendix-d--rollout-and-verification)
+- [Appendix E — Technique ↔ Assumption ↔ Defense ↔ Detection Matrix](#appendix-e--technique--assumption--defense--detection-matrix)
+- [Appendix F — Protocol References](#appendix-f--protocol-references)
 
 ---
 
@@ -794,3 +800,163 @@ A module that **fails** often means the defense is **working**:
 | LDP MD5 rejects binding | **PASS** — LDP authentication prevents LFIB poison |
 
 Always run `--dry-run` first in production environments.
+
+---
+
+## Appendix A — Trust Model: 5 Implicit Assumptions
+
+Ethernet/IP was built for mutually trusting parties. The goal was connectivity
+and fast recovery, not resisting an insider. When modern networks place mutually
+distrusting parties on shared L2/L3, the assumption breaks but the protocols
+did not change.
+
+| # | Implicit assumption | Protocols relying on it | Violation (conceptual) |
+|---|---------------------|-------------------------|------------------------|
+| 1 | A frame from a valid physical port carries valid content | ARP, DHCP, STP, CDP/LLDP | Forged frames from any port; no field binds content to source identity |
+| 2 | First responder wins | ARP, DHCP, LLMNR/NBT-NS, mDNS | Same-segment actor always wins the timing race |
+| 3 | Priority/metric reflects admin intent | STP, HSRP/VRRP, RIP/EIGRP/OSPF | Priority is self-declared, unbound to authority |
+| 4 | Control-plane members are configured infra devices | OSPF/EIGRP adjacency, LDP, FHRP | No mandatory shared secret → anyone speaking correctly becomes a peer |
+| 5 | Separation labels (VLAN tag, MPLS label, VRF) are assigned by trusted infra | 802.1Q, QinQ, MPLS | If the edge trusts externally set labels, labels become attacker input |
+
+Defense mapping: DAI restores (1) for ARP via trusted bindings; MD5/keychain
+restores (4) for routing; RA Guard + BPDU Guard restore (1)+(3) by refusing control
+roles on access; DHCP Snooping restores (2) via trusted/untrusted ports.
+
+---
+
+## Appendix B — Layered Defense Architecture: 4 Principles
+
+Every control instantiates one principle (restoring one lost assumption). Strongest
+controls sit at access (where the actor stands) to refuse control roles up front;
+distribution/core add auth for legitimate control relationships; monitoring runs
+across everything as the safety net.
+
+1. **Authenticate control-message origin** — adjacency/session/FHRP/LDP auth
+2. **Least privilege on access** — hard access, nonegotiate, disable surplus discovery
+3. **Separate control/data** — passive-interfaces, trusted/untrusted, MPLS EtherType filters
+4. **Monitor invariants** — observed vs approved control state
+
+Foundation beneath all: fine segmentation + NAC/802.1X fixes the root by removing
+location-based trust.
+
+---
+
+## Appendix C — Detection, Monitoring, Hunting
+
+Config covers only what is enabled; detection shortens dwell time. One invariant
+per technique is the signature.
+
+| Technique | Source | Signature |
+|-----------|--------|-----------|
+| ARP spoof | DAI syslog, host ARP, Zeek | DAI drops on untrusted; gateway MAC flip; one MAC many IPs |
+| CAM flood | counters, SNMP, syslog | MAC/port at max; violations; learning spike |
+| STP | syslog, traps | BPDU Guard err-disable; unplanned root change; topology-change surge |
+| Rogue DHCP | Snooping syslog | OFFER/ACK drops on untrusted; strange server MAC |
+| Starvation | DHCP logs | Sudden pool drain; many MACs per port |
+| VLAN/DTP | logs, trunk state | access→trunking; double-tagged frames; DTP on access |
+| FHRP | syslog, SNMP | state to strange IP/MAC; odd coup/resign |
+| Routing | neighbor syslog | off-inventory adjacency; auth failures; surprise LSA/route; max-prefix warns |
+| Rogue RA | RA Guard, NDP monitor | access RA drops; new v6 defaults; strange RA source |
+| LLMNR | logs, PCAP, Zeek | queries after GPO off; one host answering many names |
+| VTP inject | VTP syslog | revision jump; unexpected VLAN changes |
+| LDP inject | LDP session logs | unknown LDP neighbor; auth failures; strange label bindings |
+
+Three signal tiers:
+
+1. **On-device** — syslog/traps, cheapest and most accurate
+2. **On-wire** — SPAN to Zeek baselines (IP–MAC, DHCP servers, RA routers) + Suricata packet patterns
+3. **On-endpoint** — ARP caches, v4/v6 routes, fallback name queries via EDR
+
+Hunt hypotheses: ARP (IPs with >1 MAC/24h), gateway (gateway IP/MAC set vs
+inventory), adjacency (live vs approved neighbors), naming (responders after GPO
+off). Most valuable asset: an inventory of "legitimate control roles"
+(which gateways/DHCP/routers/root).
+
+---
+
+## Appendix D — Rollout and Verification
+
+Wrong order self-DoSes: DAI without bindings drops legit ARP; forgotten un-passive
+kills adjacency; tight max drops phones.
+
+Dependency-respecting deployment order:
+
+```
+1. Normalize access: mode access + nonegotiate + static VLAN (low-risk base).
+2. Discovery/RA hygiene: surplus CDP/LLDP off, RA Guard, GPO off LLMNR/NBT-NS.
+3. DHCP Snooping + correct trusted ports (DHCP uplinks), wait for stable bindings.
+4. DAI + IPSG after bindings stable; prep static ARP ACLs for static IPs.
+5. Port Security + Storm (realistic max, restrict first).
+6. BPDU + Root Guard with recovery runbook.
+7. Routing auth + passive-interface on core; check each adjacency.
+8. FHRP auth on virtual-gateway SVIs.
+9. (MPLS) edge EtherType filters + LDP auth.
+```
+
+Rollbacks: pilot one switch/VLAN; restrict/log before hard enforce; keep
+console/out-of-band so you cannot lock yourself out.
+
+| Control | Confirm on | Confirm no false-positive |
+|---------|-----------|---------------------------|
+| Snooping | `show ip dhcp snooping binding`; untrusted OFFER drops | legit clients get IPs |
+| DAI | `show ip arp inspection statistics` counts bad-ARP drops | static IPs (ACL) pass |
+| IPSG | off-binding source IPs drop | DHCP hosts fine |
+| PortSec | `show port-security` violations correct | phone+PC on one port works |
+| BPDU Guard | access BPDU → err-disable+log | uplinks unaffected |
+| OSPF/EIGRP | neighbors only legit; auth-fails logged | legit adjacencies up |
+| passive | access sends no hellos | uplinks still neighbor |
+| FHRP auth | keyless members can't elect | legit Active/Standby stable |
+| RA Guard | access RAs drop+log | uplink RAs pass |
+
+Bundle before/after logs + show outputs as compliance evidence and detection baselines.
+
+---
+
+## Appendix E — Technique ↔ Assumption ↔ Defense ↔ Detection Matrix
+
+A = violated assumption number(s) from Appendix A.
+
+| Technique | A | Primary enforcement | Primary detection |
+|-----------|---|---------------------|-------------------|
+| ARP spoof | 1,2 | DAI + binding | IP changes MAC; multi-IP MAC |
+| CAM flood | 1 | Port Security max | per-port MAC cap hit |
+| STP hijack | 1,3 | BPDU + Root Guard | access BPDU; root change |
+| Double-tag | 5 | separate native + allowed | double-tagged frames |
+| DTP spoof | 1 | access + nonegotiate | access trunking |
+| CDP/LLDP | 1 | off on access | discovery on access |
+| Rogue DHCP | 2 | Snooping trust | untrusted OFFER |
+| Starvation | 1,2 | PortSec + rate limit | pool drain; MACs/port |
+| HSRP/VRRP | 3,4 | FHRP MD5 | state to strange IP |
+| RIP/EIGRP | 4 | auth + passive | off-inventory adjacency |
+| OSPF LSA | 4 | auth + passive | strange neighbor/LSA |
+| BGP hijack | 4 | MD5 + prefix-list + max-prefix + RPKI | strange prefix; max-prefix warn |
+| Rogue RA | 1,2 | RA Guard host | access RA; new v6 route |
+| LLMNR | 2 | GPO off + signing | post-GPO queries; responder |
+| MPLS inject | 5 | EtherType filter + LDP auth | MPLS from CE |
+| VTP inject | 1,5 | VTP transparent / VTPv3 primary | revision jump; VLAN changes |
+| LDP inject | 4,5 | LDP MD5 + label filter | unknown neighbor; strange bindings |
+
+---
+
+## Appendix F — Protocol References
+
+| Mechanism | Standard |
+|-----------|----------|
+| ARP | RFC 826 |
+| DHCP | RFC 2131, 2132 |
+| DHCPv6 | RFC 8415 |
+| STP/RSTP/MSTP | IEEE 802.1D/w/s |
+| VLAN | IEEE 802.1Q |
+| LLDP | IEEE 802.1AB |
+| VTP | Cisco proprietary (no RFC) |
+| VRRP | RFC 5798 |
+| OSPF/auth | RFC 2328, RFC 5709 |
+| EIGRP | Cisco proprietary; informational RFC 7868 |
+| BGP | RFC 4271; TCP-AO 5925; RPKI 6480, 6811 |
+| NDP/SLAAC | RFC 4861, 4862; SEND 3971; RA Guard 6105 |
+| LLMNR | RFC 4795 |
+| MPLS | RFC 3031; L3VPN 4364; LDP 5036 |
+| NAC | IEEE 802.1X |
+
+CLI (especially JunOS) varies by release — cross-check the device's version docs
+before production.
