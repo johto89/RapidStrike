@@ -13,16 +13,23 @@ from . import (
     dhcp,
     dhcp_starve,
     dvlan,
+    eigrp,
+    hsrp,
+    icmp_redir,
     impers,
     lldp,
+    llmnr,
     mac,
+    mpls,
     mstp,
     ospf,
     pvlan,
+    ra,
     rip,
     stp,
     swspoof,
     vlan,
+    vrrp,
 )
 
 # Wrap core.preflight as a pseudo-module so it appears in the CLI list
@@ -55,6 +62,13 @@ MODULES = [
     vlan,
     # ── Routing protocols ─────────────────────────────────────────────────────
     bgp,
+    eigrp,
+    hsrp,
+    vrrp,
     ospf,
     rip,
+    ra,
+    icmp_redir,
+    llmnr,
+    mpls,
 ]
